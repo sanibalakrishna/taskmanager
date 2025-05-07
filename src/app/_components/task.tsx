@@ -1,35 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { api } from "~/trpc/react";
-import { z } from "zod";
+import {
+  PlusCircle,
+  Search,
+  CheckCircle,
+  Clock,
+  Loader2,
+  Trash2,
+  Edit,
+  X,
+  Filter,
+  SortAsc,
+  SortDesc,
+  Image as ImageIcon,
+} from "lucide-react";
 
-const statusColors = {
-  pending: "bg-yellow-400",
-  "in-progress": "bg-blue-400",
-  completed: "bg-green-500",
-} as const;
+// Status configuration
+const statusConfig = {
+  pending: {
+    color: "bg-amber-100 text-amber-800",
+    icon: <Clock className="h-4 w-4" />,
+  },
+  "in-progress": {
+    color: "bg-blue-100 text-blue-800",
+    icon: <Loader2 className="h-4 w-4" />,
+  },
+  completed: {
+    color: "bg-green-100 text-green-800",
+    icon: <CheckCircle className="h-4 w-4" />,
+  },
+};
 
 export function TaskManager() {
   const utils = api.useUtils();
 
+  // Task states
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<"pending" | "in-progress" | "completed">(
     "pending",
   );
+  const [taskImage, setTaskImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // UI states
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<"title" | "status" | "createdAt">(
+    "createdAt",
+  );
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending" | "in-progress" | "completed"
+  >("all");
+  const [editingTask, setEditingTask] = useState<any | null>(null);
+
+  // Fetch tasks
   const { data: tasks, isLoading } = api.task.getTasks.useQuery();
+
+  // Mutations
   const createTask = api.task.createTask.useMutation({
     onSuccess: async () => {
       await utils.task.invalidate();
-      setTitle("");
-      setDescription("");
-      setStatus("pending");
+      resetForm();
+      setIsModalOpen(false);
     },
   });
 
-  const updateStatus = api.task.updateTask.useMutation({
+  const updateTask = api.task.updateTask.useMutation({
     onSuccess: () => utils.task.invalidate(),
   });
 
@@ -37,107 +78,413 @@ export function TaskManager() {
     onSuccess: () => utils.task.invalidate(),
   });
 
+  // Handle file selection
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setTaskImage(file);
+
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setImagePreview(null);
+    }
+  };
+
+  // Reset form after submission
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setStatus("pending");
+    setTaskImage(null);
+    setImagePreview(null);
+    setEditingTask(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Handle task editing
+  const startEditingTask = (task: any) => {
+    setEditingTask(task);
+    setTitle(task.title);
+    setDescription(task.description || "");
+    setStatus(task.status);
+    setIsModalOpen(true);
+    // Would handle image here if backend supported it
+  };
+
+  // Handle task submission
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // For now image is just being collected but not sent to backend
+    // You would need to implement file upload in your backend
+
+    if (editingTask) {
+      updateTask.mutate({
+        id: editingTask.id,
+        title,
+        description,
+        status,
+      });
+    } else {
+      createTask.mutate({ title, description, status });
+    }
+  };
+
+  // Filter and sort tasks
+  const filteredTasks = tasks
+    ? tasks
+        .filter(
+          (task) =>
+            task.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
+            (statusFilter === "all" || task.status === statusFilter),
+        )
+        .sort((a, b) => {
+          // Sort by selected field
+          if (sortField === "title") {
+            return sortDirection === "asc"
+              ? a.title.localeCompare(b.title)
+              : b.title.localeCompare(a.title);
+          } else if (sortField === "status") {
+            return sortDirection === "asc"
+              ? a.status.localeCompare(b.status)
+              : b.status.localeCompare(a.status);
+          } else {
+            // Default to createdAt
+            // This assumes there's a createdAt field, you might need to adjust
+            return sortDirection === "asc"
+              ? new Date(a.createdAt || 0).getTime() -
+                  new Date(b.createdAt || 0).getTime()
+              : new Date(b.createdAt || 0).getTime() -
+                  new Date(a.createdAt || 0).getTime();
+          }
+        })
+    : [];
+
   return (
-    <div className="mx-auto mt-10 max-w-xl rounded-xl bg-white p-6 shadow-lg">
-      <h2 className="mb-4 text-center text-2xl font-bold">📝 Task Manager</h2>
+    <div className="rounded-lg bg-white shadow-md">
+      {/* Header with search and create button */}
+      <div className="flex flex-col gap-4 border-b p-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex-1">
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+            <Search className="h-5 w-5 text-gray-400" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search tasks..."
+            className="w-full rounded-lg border border-gray-300 bg-gray-50 py-2 pr-4 pl-10 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
 
-      {/* Create Task */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          createTask.mutate({ title, description, status });
-        }}
-        className="space-y-4"
-      >
-        <input
-          type="text"
-          placeholder="Task title"
-          className="w-full rounded-md border px-4 py-2"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          placeholder="Description"
-          className="w-full rounded-md border px-4 py-2"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as any)}
-          className="w-full rounded-md border px-4 py-2"
-        >
-          <option value="pending">Pending</option>
-          <option value="in-progress">In Progress</option>
-          <option value="completed">Completed</option>
-        </select>
-        <button
-          type="submit"
-          disabled={createTask.isPending}
-          className="w-full rounded-md bg-blue-600 py-2 font-semibold text-white hover:bg-blue-700"
-        >
-          {createTask.isPending ? "Creating..." : "Create Task"}
-        </button>
-      </form>
+        <div className="flex items-center gap-3">
+          {/* Status Filter */}
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="rounded-lg border border-gray-300 bg-gray-50 py-2 pr-10 pl-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="in-progress">In Progress</option>
+              <option value="completed">Completed</option>
+            </select>
+            <Filter className="pointer-events-none absolute top-2 right-3 h-4 w-4 text-gray-400" />
+          </div>
 
-      <hr className="my-6" />
+          {/* Sort Control */}
+          <div className="relative">
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as any)}
+              className="rounded-lg border border-gray-300 bg-gray-50 py-2 pr-10 pl-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="createdAt">Date</option>
+              <option value="title">Title</option>
+              <option value="status">Status</option>
+            </select>
+            <button
+              onClick={() =>
+                setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+              }
+              className="absolute top-2 right-3 text-gray-400"
+            >
+              {sortDirection === "asc" ? (
+                <SortAsc className="h-4 w-4" />
+              ) : (
+                <SortDesc className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
+          {/* Create button */}
+          <button
+            onClick={() => {
+              resetForm();
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+          >
+            <PlusCircle className="h-5 w-5" />
+            <span>Create Task</span>
+          </button>
+        </div>
+      </div>
 
       {/* Task List */}
-      <div>
-        <h3 className="mb-3 text-xl font-semibold">📋 Your Tasks</h3>
+      <div className="p-6">
         {isLoading ? (
-          <p>Loading tasks...</p>
-        ) : tasks?.length === 0 ? (
-          <p className="text-gray-500">No tasks found.</p>
+          <div className="flex h-40 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          </div>
+        ) : filteredTasks.length === 0 ? (
+          <div className="flex h-40 flex-col items-center justify-center text-center">
+            <p className="text-lg font-medium text-gray-600">
+              {searchQuery || statusFilter !== "all"
+                ? "No tasks match your search criteria"
+                : "No tasks found"}
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              {searchQuery || statusFilter !== "all"
+                ? "Try changing your search or filter"
+                : "Create your first task to get started"}
+            </p>
+          </div>
         ) : (
-          <ul className="space-y-4">
-            {tasks?.map((task) => (
-              <li
-                key={task.id}
-                className="flex flex-col gap-2 rounded-lg border bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <h4 className="text-lg font-bold">{task.title}</h4>
-                  {task.description && (
-                    <p className="text-sm text-gray-600">{task.description}</p>
-                  )}
-                  <span
-                    className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium text-white ${statusColors[task.status]}`}
+          <div className="overflow-hidden rounded-lg border border-gray-200">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase"
                   >
-                    {task.status}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {/* Update Status */}
-                  <select
-                    value={task.status}
-                    onChange={(e) =>
-                      updateStatus.mutate({
-                        id: task.id,
-                        status: e.target.value as any,
-                      })
-                    }
-                    className="rounded-md border px-2 py-1"
+                    Task
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium tracking-wider text-gray-500 uppercase"
                   >
-                    <option value="pending">Pending</option>
-                    <option value="in-progress">In Progress</option>
-                    <option value="completed">Completed</option>
-                  </select>
-
-                  {/* Delete */}
-                  <button
-                    onClick={() => deleteTask.mutate({ id: task.id })}
-                    className="font-semibold text-red-500 hover:text-red-700"
+                    Status
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-right text-xs font-medium tracking-wider text-gray-500 uppercase"
                   >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {filteredTasks.map((task) => (
+                  <tr key={task.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        {/* This would show task image if your backend supported it */}
+                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
+                          <ImageIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <div className="ml-4">
+                          <div className="text-sm font-medium text-gray-900">
+                            {task.title}
+                          </div>
+                          {task.description && (
+                            <div className="line-clamp-1 text-sm text-gray-500">
+                              {task.description}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${statusConfig[task.status].color}`}
+                      >
+                        {statusConfig[task.status].icon}
+                        {task.status === "in-progress"
+                          ? "In Progress"
+                          : task.status.charAt(0).toUpperCase() +
+                            task.status.slice(1)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-medium whitespace-nowrap">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => startEditingTask(task)}
+                          className="rounded p-1 text-blue-600 hover:bg-blue-50"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteTask.mutate({ id: task.id })}
+                          className="rounded p-1 text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
+
+      {/* Create/Edit Task Modal */}
+      {isModalOpen && (
+        <div className="bg-opacity-50 fixed inset-0 z-50 flex items-center justify-center bg-black p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-medium">
+                {editingTask ? "Edit Task" : "Create New Task"}
+              </h3>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="rounded-full p-1 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="title"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Title
+                </label>
+                <input
+                  type="text"
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 focus:outline-none sm:text-sm"
+                  placeholder="Task title"
+                  required
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="description"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Description
+                </label>
+                <textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 focus:outline-none sm:text-sm"
+                  placeholder="Task description"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="status"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Status
+                </label>
+                <select
+                  id="status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as any)}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 focus:outline-none sm:text-sm"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in-progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Task Image
+                </label>
+                <div className="mt-1 flex items-center">
+                  {imagePreview ? (
+                    <div className="relative h-32 w-32 overflow-hidden rounded-lg">
+                      <img
+                        src={imagePreview}
+                        alt="Task preview"
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTaskImage(null);
+                          setImagePreview(null);
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = "";
+                          }
+                        }}
+                        className="absolute top-1 right-1 rounded-full bg-white p-1 shadow-md hover:bg-gray-100"
+                      >
+                        <X className="h-4 w-4 text-gray-500" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex h-32 w-32 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
+                      <div className="text-center">
+                        <ImageIcon className="mx-auto h-8 w-8 text-gray-400" />
+                        <span className="mt-1 block text-xs text-gray-500">
+                          Upload image
+                        </span>
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        onChange={handleFileChange}
+                        accept="image/*"
+                        className="absolute h-32 w-32 cursor-pointer opacity-0"
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Optional. Upload an image for your task.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createTask.isPending || updateTask.isPending}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+                >
+                  {createTask.isPending || updateTask.isPending ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Saving...</span>
+                    </div>
+                  ) : (
+                    <span>{editingTask ? "Update Task" : "Create Task"}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
