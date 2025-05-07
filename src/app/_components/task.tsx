@@ -16,6 +16,7 @@ import {
   SortDesc,
   Image as ImageIcon,
   Upload,
+  ExternalLink,
 } from "lucide-react";
 
 // Status configuration
@@ -61,6 +62,9 @@ export function TaskManager() {
   const [editingTask, setEditingTask] = useState<any | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Store URLs that need refreshing and their expiry times
+  const [urlExpiryMap, setUrlExpiryMap] = useState<Record<string, number>>({});
 
   // Fetch tasks
   const { data: tasks, isLoading } = api.task.getTasks.useQuery();
@@ -137,14 +141,14 @@ export function TaskManager() {
       const timestamp = Date.now();
       const uniqueFileName = `${timestamp}-${file.name.replace(/\s+/g, "_")}`;
 
-      // Get upload URL from B2
-      setUploadProgress(20);
+      // Determine content type
       const contentType =
-        getMimeType(uniqueFileName) || "application/octet-stream"; // fallback
+        file.type || getMimeType(file.name) || "application/octet-stream";
 
+      // Get upload URL and auth token from your tRPC backend
+      setUploadProgress(20);
       const uploadData = await getUploadUrl.mutateAsync({
         fileName: uniqueFileName,
-        contentType,
       });
 
       setUploadProgress(40);
@@ -154,9 +158,9 @@ export function TaskManager() {
         method: "POST",
         headers: {
           Authorization: uploadData.authorizationToken,
-          "Content-Type": file.type,
-          "X-Bz-File-Name": encodeURIComponent(uniqueFileName),
-          "X-Bz-Content-Sha1": "do_not_verify", // In a production app, calculate SHA1
+          "Content-Type": contentType,
+          "X-Bz-File-Name": uniqueFileName,
+          "X-Bz-Content-Sha1": "do_not_verify", // In production, compute SHA-1 hash
         },
         body: file,
       });
@@ -164,19 +168,29 @@ export function TaskManager() {
       setUploadProgress(70);
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error("B2 upload failed:", errorText);
         throw new Error(`B2 upload failed: ${response.statusText}`);
       }
 
       const b2Response = await response.json();
-
       setUploadProgress(90);
 
-      // Confirm upload
+      // Confirm upload and get a signed URL for viewing
       const result = await confirmUpload.mutateAsync({
         fileId: b2Response.fileId,
         fileName: uniqueFileName,
-        taskId: editingTask?.id,
+        taskId: editingTask?.id, // Optional: attach image to a task
       });
+
+      // Calculate expiry time (assuming 7 days as set in your backend)
+      const expiryTime = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+      // Store the URL with its expiry time
+      setUrlExpiryMap((prev) => ({
+        ...prev,
+        [uniqueFileName]: expiryTime,
+      }));
 
       setUploadProgress(100);
       return result.imageUrl;
@@ -185,6 +199,28 @@ export function TaskManager() {
       throw new Error("Failed to upload image");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Refresh the signed URL for an image
+  const refreshImageUrl = async (fileName: string): Promise<string> => {
+    try {
+      const result = await confirmUpload.mutateAsync({
+        fileId: "", // Not needed for refreshing
+        fileName: fileName,
+      });
+
+      // Update expiry time
+      const expiryTime = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      setUrlExpiryMap((prev) => ({
+        ...prev,
+        [fileName]: expiryTime,
+      }));
+
+      return result.imageUrl;
+    } catch (error) {
+      console.error("Failed to refresh URL:", error);
+      throw error;
     }
   };
 
@@ -228,6 +264,43 @@ export function TaskManager() {
     }
   };
 
+  // Extract filename from URL
+  const getFileNameFromUrl = (url: string): string | null => {
+    const match = url.match(/\/file\/[^/]+\/([^?]+)/);
+    return match ? match[1] : null;
+  };
+
+  // Helper to check if URL needs refreshing (approaching expiry)
+  const needsUrlRefresh = (url: string): boolean => {
+    const fileName = getFileNameFromUrl(url);
+    if (!fileName) return false;
+
+    const expiryTime = urlExpiryMap[fileName];
+    if (!expiryTime) return false;
+
+    // Refresh when less than 1 day remains (6 days into the 7-day period)
+    return Date.now() > expiryTime - 24 * 60 * 60 * 1000;
+  };
+
+  // Get image URL with automatic refresh if needed
+  const getImageUrl = async (url: string): Promise<string> => {
+    if (!url) return "";
+
+    const fileName = getFileNameFromUrl(url);
+    if (!fileName) return url;
+
+    if (needsUrlRefresh(url)) {
+      try {
+        return await refreshImageUrl(fileName);
+      } catch (error) {
+        console.error("Error refreshing URL:", error);
+        return url; // Fall back to original URL if refresh fails
+      }
+    }
+
+    return url;
+  };
+
   // Filter and sort tasks
   const filteredTasks = tasks
     ? tasks
@@ -256,6 +329,41 @@ export function TaskManager() {
           }
         })
     : [];
+
+  // Effect to check for URLs that need refreshing when tasks change
+  useEffect(() => {
+    if (!tasks) return;
+
+    const checkAndRefreshUrls = async () => {
+      for (const task of tasks) {
+        if (task.imageUrl && needsUrlRefresh(task.imageUrl)) {
+          const fileName = getFileNameFromUrl(task.imageUrl);
+          if (fileName) {
+            try {
+              const newUrl = await refreshImageUrl(fileName);
+
+              // Update the task in the database with the new URL
+              await updateTask.mutateAsync({
+                id: task.id,
+                imageUrl: newUrl,
+                // Include required fields to avoid overwriting them
+                title: task.title,
+                status: task.status,
+                description: task.description,
+              });
+            } catch (error) {
+              console.error(
+                `Failed to refresh URL for task ${task.id}:`,
+                error,
+              );
+            }
+          }
+        }
+      }
+    };
+
+    checkAndRefreshUrls();
+  }, [tasks]);
 
   return (
     <div className="rounded-lg bg-white shadow-md">
@@ -384,6 +492,27 @@ export function TaskManager() {
                               src={task.imageUrl}
                               alt="Task"
                               className="h-10 w-10 rounded-full object-cover"
+                              onError={(e) => {
+                                // Handle expired URLs by attempting a refresh
+                                const fileName = getFileNameFromUrl(
+                                  task.imageUrl,
+                                );
+                                if (fileName) {
+                                  refreshImageUrl(fileName).then((newUrl) => {
+                                    // Update the image src with the new URL
+                                    (e.target as HTMLImageElement).src = newUrl;
+
+                                    // Also update the task in the database
+                                    updateTask.mutate({
+                                      id: task.id,
+                                      imageUrl: newUrl,
+                                      title: task.title,
+                                      status: task.status,
+                                      description: task.description,
+                                    });
+                                  });
+                                }
+                              }}
                             />
                           </div>
                         ) : (
@@ -574,7 +703,8 @@ export function TaskManager() {
                   )}
                 </div>
                 <p className="mt-1 text-xs text-gray-500">
-                  Optional. Images are stored in Backblaze B2 cloud storage.
+                  Optional. Images are stored in Backblaze B2 private bucket
+                  with time-limited access.
                 </p>
               </div>
 

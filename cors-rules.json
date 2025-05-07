@@ -1,0 +1,15 @@
+[
+  {
+    "corsRuleName": "allowBrowserUploads",
+    "allowedOrigins": ["*"],
+    "allowedOperations": ["b2_upload_file"],
+    "allowedHeaders": [
+      "authorization",
+      "X-Bz-File-Name",
+      "X-Bz-Content-Sha1",
+      "Content-Type"
+    ],
+    "exposeHeaders": ["x-bz-content-sha1"],
+    "maxAgeSeconds": 3600
+  }
+]
