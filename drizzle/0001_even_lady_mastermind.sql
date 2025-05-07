@@ -1,0 +1,1 @@
+ALTER TABLE "taskmanager_task" ALTER COLUMN "id" SET DATA TYPE varchar;

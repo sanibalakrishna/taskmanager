@@ -20,11 +20,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@paralleldrive/cuid2": "^2.2.2",
     "@t3-oss/env-nextjs": "^0.12.0",
     "@tanstack/react-query": "^5.69.0",
     "@trpc/client": "^11.0.0",
     "@trpc/react-query": "^11.0.0",
     "@trpc/server": "^11.0.0",
+    "backblaze-b2": "^1.7.0",
     "drizzle-orm": "^0.41.0",
     "next": "^15.2.3",
     "postgres": "^3.4.4",
