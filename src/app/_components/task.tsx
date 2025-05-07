@@ -1,5 +1,5 @@
 "use client";
-
+import { lookup as getMimeType } from "mime-types";
 import { useState, useRef, useEffect } from "react";
 import { api } from "~/trpc/react";
 import {
@@ -15,6 +15,7 @@ import {
   SortAsc,
   SortDesc,
   Image as ImageIcon,
+  Upload,
 } from "lucide-react";
 
 // Status configuration
@@ -44,6 +45,7 @@ export function TaskManager() {
   );
   const [taskImage, setTaskImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // UI states
@@ -57,6 +59,8 @@ export function TaskManager() {
     "all" | "pending" | "in-progress" | "completed"
   >("all");
   const [editingTask, setEditingTask] = useState<any | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Fetch tasks
   const { data: tasks, isLoading } = api.task.getTasks.useQuery();
@@ -77,6 +81,10 @@ export function TaskManager() {
   const deleteTask = api.task.deleteTask.useMutation({
     onSuccess: () => utils.task.invalidate(),
   });
+
+  // B2 image upload mutations
+  const getUploadUrl = api.b2.getUploadUrl.useMutation();
+  const confirmUpload = api.b2.confirmUpload.useMutation();
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,7 +109,9 @@ export function TaskManager() {
     setStatus("pending");
     setTaskImage(null);
     setImagePreview(null);
+    setImageUrl(null);
     setEditingTask(null);
+    setUploadProgress(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -113,26 +123,108 @@ export function TaskManager() {
     setTitle(task.title);
     setDescription(task.description || "");
     setStatus(task.status);
+    setImageUrl(task.imageUrl || null);
     setIsModalOpen(true);
-    // Would handle image here if backend supported it
+  };
+
+  // Upload image to B2
+  const uploadImageToB2 = async (file: File): Promise<string> => {
+    setIsUploading(true);
+    setUploadProgress(10);
+
+    try {
+      // Generate a unique filename to avoid collisions
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}-${file.name.replace(/\s+/g, "_")}`;
+
+      // Get upload URL from B2
+      setUploadProgress(20);
+      const contentType =
+        getMimeType(uniqueFileName) || "application/octet-stream"; // fallback
+
+      const uploadData = await getUploadUrl.mutateAsync({
+        fileName: uniqueFileName,
+        contentType,
+      });
+
+      setUploadProgress(40);
+
+      // Upload file directly to B2 using fetch with blob
+      const response = await fetch(uploadData.uploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: uploadData.authorizationToken,
+          "Content-Type": file.type,
+          "X-Bz-File-Name": encodeURIComponent(uniqueFileName),
+          "X-Bz-Content-Sha1": "do_not_verify", // In a production app, calculate SHA1
+        },
+        body: file,
+      });
+
+      setUploadProgress(70);
+
+      if (!response.ok) {
+        throw new Error(`B2 upload failed: ${response.statusText}`);
+      }
+
+      const b2Response = await response.json();
+
+      setUploadProgress(90);
+
+      // Confirm upload
+      const result = await confirmUpload.mutateAsync({
+        fileId: b2Response.fileId,
+        fileName: uniqueFileName,
+        taskId: editingTask?.id,
+      });
+
+      setUploadProgress(100);
+      return result.imageUrl;
+    } catch (error) {
+      console.error("B2 upload error:", error);
+      throw new Error("Failed to upload image");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Handle task submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsUploading(true);
 
-    // For now image is just being collected but not sent to backend
-    // You would need to implement file upload in your backend
+    try {
+      let finalImageUrl = imageUrl;
 
-    if (editingTask) {
-      updateTask.mutate({
-        id: editingTask.id,
-        title,
-        description,
-        status,
-      });
-    } else {
-      createTask.mutate({ title, description, status });
+      // Upload image to B2 if present
+      if (taskImage) {
+        finalImageUrl = await uploadImageToB2(taskImage);
+      }
+
+      if (editingTask) {
+        await updateTask.mutateAsync({
+          id: editingTask.id,
+          title,
+          description,
+          status,
+          imageUrl: finalImageUrl || undefined,
+        });
+      } else {
+        await createTask.mutateAsync({
+          title,
+          description,
+          status,
+          imageUrl: finalImageUrl || undefined,
+        });
+      }
+
+      setIsModalOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error("Error submitting task:", error);
+      // You might want to add error handling here (e.g., show a toast)
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -156,7 +248,6 @@ export function TaskManager() {
               : b.status.localeCompare(a.status);
           } else {
             // Default to createdAt
-            // This assumes there's a createdAt field, you might need to adjust
             return sortDirection === "asc"
               ? new Date(a.createdAt || 0).getTime() -
                   new Date(b.createdAt || 0).getTime()
@@ -287,10 +378,19 @@ export function TaskManager() {
                   <tr key={task.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        {/* This would show task image if your backend supported it */}
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
-                          <ImageIcon className="h-5 w-5 text-gray-400" />
-                        </div>
+                        {task.imageUrl ? (
+                          <div className="flex h-10 w-10 flex-shrink-0">
+                            <img
+                              src={task.imageUrl}
+                              alt="Task"
+                              className="h-10 w-10 rounded-full object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
+                            <ImageIcon className="h-5 w-5 text-gray-400" />
+                          </div>
+                        )}
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">
                             {task.title}
@@ -413,11 +513,11 @@ export function TaskManager() {
                 <label className="block text-sm font-medium text-gray-700">
                   Task Image
                 </label>
-                <div className="mt-1 flex items-center">
-                  {imagePreview ? (
+                <div className="mt-1 flex items-center gap-4">
+                  {imagePreview || imageUrl ? (
                     <div className="relative h-32 w-32 overflow-hidden rounded-lg">
                       <img
-                        src={imagePreview}
+                        src={imagePreview || imageUrl || ""}
                         alt="Task preview"
                         className="h-full w-full object-cover"
                       />
@@ -426,6 +526,9 @@ export function TaskManager() {
                         onClick={() => {
                           setTaskImage(null);
                           setImagePreview(null);
+                          if (!editingTask) {
+                            setImageUrl(null);
+                          }
                           if (fileInputRef.current) {
                             fileInputRef.current.value = "";
                           }
@@ -438,9 +541,9 @@ export function TaskManager() {
                   ) : (
                     <div className="flex h-32 w-32 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
                       <div className="text-center">
-                        <ImageIcon className="mx-auto h-8 w-8 text-gray-400" />
+                        <Upload className="mx-auto h-8 w-8 text-gray-400" />
                         <span className="mt-1 block text-xs text-gray-500">
-                          Upload image
+                          Upload to B2
                         </span>
                       </div>
                       <input
@@ -452,9 +555,26 @@ export function TaskManager() {
                       />
                     </div>
                   )}
+
+                  {isUploading && (
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs font-medium text-gray-700">
+                        Uploading to B2...
+                      </div>
+                      <div className="h-2 w-full max-w-xs rounded-full bg-gray-200">
+                        <div
+                          className="h-2 rounded-full bg-blue-600 transition-all"
+                          style={{ width: `${uploadProgress}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {uploadProgress}%
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-gray-500">
-                  Optional. Upload an image for your task.
+                  Optional. Images are stored in Backblaze B2 cloud storage.
                 </p>
               </div>
 
@@ -468,10 +588,14 @@ export function TaskManager() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createTask.isPending || updateTask.isPending}
+                  disabled={
+                    isUploading || createTask.isPending || updateTask.isPending
+                  }
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
                 >
-                  {createTask.isPending || updateTask.isPending ? (
+                  {isUploading ||
+                  createTask.isPending ||
+                  updateTask.isPending ? (
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Saving...</span>

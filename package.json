@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.804.0",
+    "@aws-sdk/s3-request-presigner": "^3.804.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "@t3-oss/env-nextjs": "^0.12.0",
     "@tanstack/react-query": "^5.69.0",
@@ -28,6 +30,8 @@
     "@trpc/server": "^11.0.0",
     "backblaze-b2": "^1.7.0",
     "drizzle-orm": "^0.41.0",
+    "lucide-react": "^0.508.0",
+    "mime-types": "^3.0.1",
     "next": "^15.2.3",
     "postgres": "^3.4.4",
     "react": "^19.0.0",
@@ -39,6 +43,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@tailwindcss/postcss": "^4.0.15",
+    "@types/backblaze-b2": "^1.5.6",
     "@types/node": "^20.14.10",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
