@@ -12,7 +12,7 @@ export const updateTaskSchema = z.object({
   title: z.string().optional(),
   status: z.enum(["pending", "in-progress", "completed"]).optional(),
   description: z.string().optional(),
-  imageUrl: z.string().url().optional(),
+  imageUrl: z.string().url().nullable().optional(),
 });
 
 export const deleteTaskSchema = z.object({

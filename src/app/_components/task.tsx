@@ -244,14 +244,14 @@ export function TaskManager() {
           title,
           description,
           status,
-          imageUrl: finalImageUrl || undefined,
+          imageUrl: finalImageUrl ?? null,
         });
       } else {
         await createTask.mutateAsync({
           title,
           description,
           status,
-          imageUrl: finalImageUrl || undefined,
+          imageUrl: finalImageUrl ?? null,
         });
       }
 
