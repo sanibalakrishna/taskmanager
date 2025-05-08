@@ -39,14 +39,17 @@ export const taskRouter = createTRPCRouter({
       return result;
     }),
 
-  updateTask: publicProcedure
+    updateTask: publicProcedure
     .input(updateTaskSchema)
     .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+  
       return await ctx.db
         .update(tasks)
-        .set({ status: input.status })
-        .where(eq(tasks.id, input.id));
+        .set(data)
+        .where(eq(tasks.id, id));
     }),
+  
 
   deleteTask: publicProcedure
     .input(deleteTaskSchema)

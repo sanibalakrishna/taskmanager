@@ -9,7 +9,10 @@ export const createTaskSchema = z.object({
 
 export const updateTaskSchema = z.object({
   id: z.string(), // CUID regex pattern
-  status: z.enum(["pending", "in-progress", "completed"]),
+  title: z.string().optional(),
+  status: z.enum(["pending", "in-progress", "completed"]).optional(),
+  description: z.string().optional(),
+  imageUrl: z.string().url().optional(),
 });
 
 export const deleteTaskSchema = z.object({
