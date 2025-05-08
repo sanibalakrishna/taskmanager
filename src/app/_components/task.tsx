@@ -62,6 +62,7 @@ export function TaskManager() {
   const [editingTask, setEditingTask] = useState<any | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [fileInputKey, setFileInputKey] = useState(0); // to force input reset
 
   // Store URLs that need refreshing and their expiry times
   const [urlExpiryMap, setUrlExpiryMap] = useState<Record<string, number>>({});
@@ -643,47 +644,53 @@ export function TaskManager() {
                   Task Image
                 </label>
                 <div className="mt-1 flex items-center gap-4">
-                  {imagePreview || imageUrl ? (
-                    <div className="relative h-32 w-32 overflow-hidden rounded-lg">
-                      <img
-                        src={imagePreview || imageUrl || ""}
-                        alt="Task preview"
-                        className="h-full w-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTaskImage(null);
-                          setImagePreview(null);
-                          if (!editingTask) {
+                  <div className="relative h-32 w-32">
+                    {imagePreview || imageUrl ? (
+                      <>
+                        <div className="h-full w-full overflow-hidden rounded-lg">
+                          <img
+                            src={imagePreview || imageUrl || ""}
+                            alt="Task preview"
+                            className="pointer-events-none h-full w-full rounded-lg object-cover"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            console.log("Hello");
+                            setTaskImage(null);
+                            setImagePreview(null);
                             setImageUrl(null);
-                          }
-                          if (fileInputRef.current) {
-                            fileInputRef.current.value = "";
-                          }
-                        }}
-                        className="absolute top-1 right-1 rounded-full bg-white p-1 shadow-md hover:bg-gray-100"
-                      >
-                        <X className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex h-32 w-32 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
-                      <div className="text-center">
-                        <Upload className="mx-auto h-8 w-8 text-gray-400" />
-                        <span className="mt-1 block text-xs text-gray-500">
-                          Upload to B2
-                        </span>
+                            if (!editingTask) {
+                              setImageUrl(null);
+                            }
+                            if (fileInputRef.current) {
+                              fileInputRef.current.value = "";
+                            }
+                          }}
+                          className="absolute -top-2 -right-2 z-10 rounded-full bg-white p-1 shadow-md hover:bg-gray-100"
+                        >
+                          <X className="h-4 w-4 text-gray-500" />
+                        </button>
+                      </>
+                    ) : (
+                      <div className="relative flex h-full w-full items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
+                        <div className="text-center">
+                          <Upload className="mx-auto h-8 w-8 text-gray-400" />
+                          <span className="mt-1 block text-xs text-gray-500">
+                            Upload to B2
+                          </span>
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          onChange={handleFileChange}
+                          accept="image/*"
+                          className="absolute inset-0 cursor-pointer opacity-0"
+                        />
                       </div>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        onChange={handleFileChange}
-                        accept="image/*"
-                        className="absolute h-32 w-32 cursor-pointer opacity-0"
-                      />
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {isUploading && (
                     <div className="flex flex-col gap-1">
